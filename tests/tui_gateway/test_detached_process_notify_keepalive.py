@@ -109,6 +109,25 @@ def test_cap_and_ttl_reapers_spare_session_with_pending_process_notice(server, r
     assert not server._session_is_evictable(sid, session, time.time() + 10 * 86400)
 
 
+def test_backend_retirement_waits_for_pending_process_notice(server, registry, detached):
+    from hermes_cli.web_server_idle_proof import idle_proof
+    from tools.process_registry_awaiting import release, take_ready
+
+    _, session, _ = detached
+    assert idle_proof(input_probe=lambda: 0)["idle"] is True
+
+    proc = _spawn(registry, session["session_key"], notify_on_complete=True)
+    assert idle_proof(input_probe=lambda: 0)["idle"] is False
+
+    proc.mark_exited(0)
+    registry._move_to_finished(proc)
+    ready = take_ready(registry.completion_queue, 0)
+    assert idle_proof(input_probe=lambda: 0)["idle"] is False
+
+    release(ready)
+    assert idle_proof(input_probe=lambda: 0)["idle"] is True
+
+
 def test_orphan_reap_rearms_while_process_will_notify(server, registry, detached):
     sid, session, popped = detached
     _spawn(registry, session["session_key"], notify_on_complete=True)

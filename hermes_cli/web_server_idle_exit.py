@@ -120,7 +120,9 @@ def busy_ledger() -> Optional[str]:
         if retirement.active_count():
             return "retirement_admission"
         with gateway._sessions_lock:
-            busy_sessions = [sid for sid, s in gateway._sessions.items() if _session_work_in_flight(s)]
+            busy_sessions = [sid for sid, s in gateway._sessions.items()
+                             if _session_work_in_flight(s)
+                             or gateway._session_owns_pending_process_notification(s)]
         if busy_sessions:
             return "session:" + ",".join(str(sid) for sid in busy_sessions)
         from tools.async_delegation import active_count

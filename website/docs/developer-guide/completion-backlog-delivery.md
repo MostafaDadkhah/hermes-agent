@@ -37,6 +37,12 @@ Addressed events still require a provable owner; another live session cannot ado
 them. Delegation delivery continues through its existing durable claim/complete
 ledger, once per delegation rather than once per process batch.
 
+TUI/Desktop automatic WebSocket-orphan, idle, capacity and backend retirement cleanup retain the
+owning conversation while a notifying terminal job is running or its result is
+awaiting dispatch. Once the result is routed, the detached session can be reclaimed
+normally. Explicit session close and Stop retain their existing cleanup behavior;
+non-notifying servers do not pin a session.
+
 ## Local validation and its limits
 
 `evals/completion_backlog_probe.py REPO OUTPUT.json` starts real local shell children
