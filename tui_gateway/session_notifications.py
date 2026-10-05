@@ -108,6 +108,43 @@ def _notification_event_requires_owner(evt: dict) -> bool:
     return evt.get("type") == "async_delegation" or bool(evt.get("origin_ui_session_id") or evt.get("session_key"))
 
 
+def _session_has_pending_process_notifications(sid: str, session: dict) -> bool:
+    """Retain a detached completion owner through child exit AND notification dispatch.
+
+    A finished chat turn may still owe the next step after a notifying terminal job.
+    Reaping its agent kills that job and consumes its completion. Use the poller's
+    conversation/lineage ownership, never the terminal environment's shared task id.
+    Stop and notification opt-out carry no promise of an automatic continuation.
+    """
+    if session.get("_turn_cancel_requested") or session.get("_finalized"):
+        return False
+    if not any(_notif_current_keys(sid, session)):
+        return False
+    try:
+        from tools.process_registry import process_registry
+
+        with _session_profile_runtime_scope(session):
+            delivered = session.get("_process_notifications_delivered", set())
+            for entry in process_registry.list_sessions():
+                process_id = entry["session_id"]
+                if (not entry.get("notify_on_complete") or process_id in delivered
+                        or process_registry.is_completion_consumed(process_id)):
+                    continue
+                process = process_registry.get(process_id)
+                if process is not None and _session_owns_notification_event(
+                        sid, session, {"session_key": process.session_key}):
+                    # A desktop viewer must not retain a messaging gateway's lifecycle.
+                    with _session_db(session) as db:
+                        key = _session_lookup_key(session, fallback=sid)
+                        if db is not None and _is_gateway_owned_source((db.get_session(key) or {}).get("source", "")):
+                            return False
+                    return not _background_notifications_off(session)
+        return False
+    except Exception:
+        logger.debug("Failed to query pending process notifications for UI session %s", sid, exc_info=True)
+        return True  # Registry failure must not turn a disconnect into destructive cleanup.
+
+
 # Extra dedup fields per event type. Completions are terminal (one-shot per process session); watch events are not —
 # one process can match patterns many times, so their content is part of the key.
 _DEDUP_EXTRA_FIELDS = {
@@ -606,6 +643,9 @@ def _notif_dispatch_completions(sid, session, notifications, registry, deferred)
         return
     for event, _text, claim in claimed:
         complete_event_delivery(event, claim)
+        # UI emission and read-only process polls are not delivery. Keep the owner
+        # pinned even while the event is out of the queue, until its turn returns.
+        session.setdefault("_process_notifications_delivered", set()).add(event["session_id"])
 
 
 def _notif_handle_ready(sid, session, events, emitted, registry, fmt, deferred, *, owned=False):
