@@ -80,7 +80,7 @@ def background_owner(monkeypatch, tmp_path):
             process._reader_thread.join(timeout=10)
 
 
-@pytest.mark.parametrize("reaper", ["ws", "ttl", "lru"])
+@pytest.mark.parametrize("reaper", ["ws", "ttl", "lru", "backend"])
 def test_detached_job_keeps_owner_until_completion_turn(background_owner, monkeypatch, reaper):
     from tools.process_registry_notifications import format_process_notification
 
@@ -92,6 +92,10 @@ def test_detached_job_keeps_owner_until_completion_turn(background_owner, monkey
             assert server._sessions.get(env.sid) is env.session
         elif reaper == "ttl":
             assert not server._session_is_evictable(env.sid, env.session, time.time())
+        elif reaper == "backend":
+            from hermes_cli.web_server_idle_proof import idle_proof
+
+            assert idle_proof(input_probe=lambda: 0)["idle"] is False
         else:
             assert not server._session_is_lru_evictable(env.sid, env.session)
 
@@ -116,6 +120,10 @@ def test_detached_job_keeps_owner_until_completion_turn(background_owner, monkey
                               format_process_notification, None)
     assert len(turns) == 1 and "BACKGROUND_RESULT" in turns[0]
     assert server._session_is_lru_evictable(env.sid, env.session)
+    if reaper == "backend":
+        from hermes_cli.web_server_idle_proof import idle_proof
+
+        assert idle_proof(input_probe=lambda: 0)["idle"] is True
     env.reap()
     assert env.sid not in server._sessions
 

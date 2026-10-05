@@ -37,7 +37,7 @@ Addressed events still require a provable owner; another live session cannot ado
 them. Delegation delivery continues through its existing durable claim/complete
 ledger, once per delegation rather than once per process batch.
 
-TUI/Desktop automatic WebSocket-orphan, idle and capacity cleanup retain the
+TUI/Desktop automatic WebSocket-orphan, idle, capacity and backend retirement cleanup retain the
 owning conversation while a `notify_on_complete` terminal job is running or its
 result is awaiting dispatch. Reading status with `process_manage(action="poll")`
 does not fulfill that delivery. Once the result is consumed with wait/log, or the
