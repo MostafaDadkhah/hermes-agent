@@ -25,10 +25,11 @@ def background_owner(monkeypatch, tmp_path):
     monkeypatch.setattr(run_agent, "cleanup_browser", lambda *a, **k: None)
     monkeypatch.setattr(computer_use, "release_computer_use_session", lambda *a, **k: None)
     monkeypatch.setattr(server, "_get_db", lambda: None)
-    monkeypatch.setattr(server, "_load_cfg", lambda: {})
+    monkeypatch.setattr(server, "_load_cfg", dict)
     monkeypatch.setattr(server, "_emit", lambda *a: None)
     monkeypatch.setattr(server, "_session_pending_kind", lambda *a: None)
     monkeypatch.setattr(server, "_session_has_active_delegations", lambda *a: False)
+    monkeypatch.setattr(server, "_session_owns_live_wakeup_schedule", lambda *a: False)
     monkeypatch.setattr(server, "_pending_ws_reaps", {})
     monkeypatch.setattr(server, "_WS_ORPHAN_REAP_GRACE_S", 20)
     timers = []
@@ -114,6 +115,7 @@ def test_detached_job_keeps_owner_until_completion_turn(background_owner, monkey
         check_protected()
         turns.append(text)
         server._notif_release_turn(session)
+        return True
 
     monkeypatch.setattr(server, "_run_prompt_submit", submit)
     server._notif_handle_ready(env.sid, env.session, [event], set(), env.registry,
