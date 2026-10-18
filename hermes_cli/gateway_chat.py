@@ -89,7 +89,8 @@ def wants_latest(args):
 
 
 def validate_options(args):
-    unsupported = [name for name in _UNSUPPORTED if getattr(args, name, None)]
+    unsupported = [name for name in _UNSUPPORTED if getattr(args, name, None)
+                   and not (name == "run_budget" and getattr(args, "task_policy_file", None))]
     if getattr(args, "create_if_missing", False) and not continue_title(args):
         unsupported.append("create-if-missing without -c <name>")
     if unsupported:
@@ -169,14 +170,16 @@ async def run_gateway_chat(args, emitter=None):
     # Finite: answer one prompt and exit (-z, --oneshot, -Q, stream-json, or -q off a TTY).
     oneshot = bool(oneshot_prompt or getattr(args, "oneshot_exit", False) or quiet or
                    (query and not (sys.stdin.isatty() and sys.stdout.isatty())))
+    from hermes_cli.gateway_task_policy import prepare_task_launch, require_task_capability, finish_task_launch
+    task = await prepare_task_launch(args, oneshot)
     async with connect_gateway() as client:
         description = await client.rpc("runtime.describe")
+        require_task_capability(description, task)
         title = continue_title(args)
         create_if_missing = bool(title and getattr(args, "create_if_missing", False))
         latest = wants_latest(args)
         if latest:
             snapshot = await _resume_latest(client, args)
-            check_resume_policy(args, snapshot)
         elif getattr(args, "resume", None) or (title and not create_if_missing):
             name = getattr(args, "resume", None) or title
             try:
@@ -193,7 +196,6 @@ async def run_gateway_chat(args, emitter=None):
                     raise GatewayClientError(
                         f"No session found matching '{name}'. Use 'hermes sessions list' to see available "
                         "sessions, or pass -c <name> --create-if-missing to start a new session with that title.")
-            check_resume_policy(args, snapshot)
         else:
             contract = description.get("session_create", {})
             # Finite runs are stored as ``oneshot`` (hidden from human pickers, still CLI history);
@@ -222,6 +224,7 @@ async def run_gateway_chat(args, emitter=None):
             snapshot = await client.rpc("session.create", request_id=uuid.uuid4().hex, source=source, **policy)
             if (warning := (snapshot.get("info") or {}).get("config_warning")) and not isinstance(oneshot_prompt, str):
                 print(f"Warning: {warning}", file=sys.stderr)
+        snapshot = await finish_task_launch(client, args, snapshot, task)
         if not isinstance(oneshot_prompt, str):  # main's -z writes nothing to stderr on success
             print("Session: " + snapshot["stored_session_id"], file=sys.stderr, flush=True)
         if not oneshot:
@@ -280,6 +283,8 @@ def _launch_flags(args):
 
 def _requested_policy(args):
     policy = _launch_flags(args)
+    if getattr(args, 'task_policy_file', None) and getattr(args, 'run_budget', None):
+        policy['run_budget'] = args.run_budget
     if isinstance(policy.get("toolsets"), str):
         policy["toolsets"] = [name.strip() for name in policy["toolsets"].split(",") if name.strip()]
     if "skills" in policy:

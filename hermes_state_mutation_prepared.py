@@ -91,9 +91,18 @@ def edit_policy_in_transaction(db, conn, session_id, payload, prepared):
                                               'execution_generation': generation}
 
 
+def task_policy_in_transaction(db, conn, session_id, payload, prepared):
+    from hermes_state_mutation_guards import require_idle
+    snapshot = validate_prepared(db, conn, session_id, prepared)
+    require_idle(db, conn, list({session_id, snapshot['target']}))
+    affected, projection = workspace_in_transaction(db, conn, session_id, payload, prepared)
+    return affected, {**projection, 'task_id': payload['task_id'], 'contract_digest': payload['contract_digest']}
+
+
 POLICY_HANDLERS = {'model': model_in_transaction, 'reasoning': reasoning_in_transaction,
                    'workspace': workspace_in_transaction, 'editor_mcp': editor_mcp_in_transaction,
-                   'edit_policy': edit_policy_in_transaction}
+                   'edit_policy': edit_policy_in_transaction,
+                   'task_policy': task_policy_in_transaction}
 
 
 _RECEIPTS = "FROM state_meta WHERE key GLOB 'gateway.mutation.v1.*' AND json_valid(value) "

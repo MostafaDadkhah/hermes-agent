@@ -982,6 +982,13 @@ def restore_policy(data):
             if not isinstance(json.loads(value), dict):
                 raise ValueError('invalid policy object')
         terminal = json.loads(policy.terminal_json)
+        from gateway.session_task_policy import task_policy, validate_task_policy
+        task = task_policy(policy)
+        if task is not None:
+            validate_task_policy(task)
+            if (policy.cwd != task['launch']['cwd'] or list(policy.toolsets) != task['launch']['toolsets']
+                    or terminal != task['terminal']):
+                raise ValueError('task policy mismatch')
         if terminal_uses_host_cwd(terminal) and terminal.get('TERMINAL_CWD') != policy.cwd:
             raise ValueError('terminal policy mismatch')
         return replace(policy, toolsets=tuple(policy.toolsets))

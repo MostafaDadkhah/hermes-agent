@@ -43,7 +43,8 @@ def managed_policy(authority, ref):
     policy = policy_for_source(authority.runner, authority.sessions[ref.session_id].source)
     if policy is None:
         return None
-    if policy.ignore_user_config or policy.kanban_json is not None:
+    from gateway.session_task_policy import task_policy
+    if policy.ignore_user_config or policy.kanban_json is not None or task_policy(policy) is not None:
         return policy
     if policy.config().get('gateway', {}).get('managed_workers') is not True:
         return None
@@ -392,6 +393,13 @@ def _prompt_frame(authority, ref, row, worker, frame):
     return True
 
 
+def _execution_env(authority, policy):
+    from gateway.session_task_policy import task_policy
+    env = _worker_env(authority)
+    task = task_policy(policy)
+    return {**(os.environ if env is None else env), **task['client_env']} if task else env
+
+
 def _worker_env(authority):
     """Child env for the OWNING profile under multiplex: its HERMES_HOME plus its ``.env``
     secrets over a scrubbed base, never the launch profile's process environment (the same
@@ -551,7 +559,7 @@ async def _spawn_registered_worker(authority, ref, row):
     spawning = _mark_spawning(authority, ref, row)
     generation = row.get('generation')
     try:
-        env = await asyncio.to_thread(_worker_env, authority)
+        env = await asyncio.to_thread(_execution_env, authority, policy)
         cwd = (await asyncio.to_thread(Path(__file__).resolve)).parents[1]
         from gateway.session_worker_spawn import acquire_process
         from gateway.session_managed_worker_log import worker_log_path
