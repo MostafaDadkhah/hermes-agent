@@ -13,7 +13,7 @@ from hermes_state_runtime import RuntimeStoreError, mutate_runtime_session
 
 _METADATA = frozenset({'rename', 'archive', 'sidebar'})
 # Prepared off the commit like model, then published as a new frozen policy.
-_POLICY = frozenset({'model', 'reasoning', 'workspace', 'editor_mcp'})
+_POLICY = frozenset({'model', 'reasoning', 'workspace', 'editor_mcp', 'task_policy'})
 _FIELDS = frozenset({'session_id', 'request_id', 'expected_revision', 'operation', 'payload'})
 
 
@@ -67,7 +67,9 @@ def _owner_ref(authority, ref, params):
     return ref if owner == ref.session_id else SessionRef(ref.profile_id, owner)
 
 
-async def mutate_session(authority, actor, ref, params):
+async def mutate_session(authority, actor, ref, params, *, native_owner=False):
+    if params.get('operation') == 'task_policy' and not native_owner:
+        raise RuntimeStoreError('permission_denied')
     from gateway.session_runtime_workers import track_mutation
     authority._require_admission_open()
     # A request socket can disappear while its writer is inside to_thread. The owner task keeps
@@ -267,7 +269,7 @@ def _project_committed(authority, ref, operation, result):
         from gateway.session_local import local_session_info
         authority.sessions[ref.session_id].event_stream.publish(
             ref.session_id, local_session_info(authority, ref), event_type='session.info')
-    if operation == 'workspace':
+    if operation in {'workspace', 'task_policy'}:
         # Main's move drops the terminal environment so the next command starts in the new folder.
         from hermes_state_local import local_receipt
         from tools.terminal_tool_lifecycle import cleanup_vm

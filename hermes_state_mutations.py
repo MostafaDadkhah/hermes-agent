@@ -15,6 +15,10 @@ def validate_action(operation, payload):
         from hermes_constants import parse_reasoning_effort
         if 'reasoning' not in payload or parse_reasoning_effort(payload['reasoning']) is not None:
             return
+    if operation == 'task_policy':
+        from gateway.session_task_policy import validate_task_policy
+        validate_task_policy(payload)
+        return
     if operation == 'branch' and _valid_branch_payload(payload):
         return
     # Session-scope ``/reasoning <level>`` and Desktop's Move to project: revision-fenced edits of
@@ -84,7 +88,7 @@ def apply_action(db, conn, session_id, operation, payload, *, prepared=None):
     if operation == 'compress':
         from hermes_state_mutation_compress import compress_in_transaction
         return compress_in_transaction(db, conn, session_id, payload, prepared)
-    if operation in {'model', 'reasoning', 'workspace', 'editor_mcp'}:
+    if operation in {'model', 'reasoning', 'workspace', 'editor_mcp', 'task_policy'}:
         from hermes_state_mutation_prepared import POLICY_HANDLERS
         return POLICY_HANDLERS[operation](db, conn, session_id, payload, prepared)
     if operation == 'branch':

@@ -42,7 +42,10 @@ def _ephemeral_prompt(authority, policy, chat_id):
     if not policy.ignore_user_config and resolve is not None:
         from gateway.config import Platform
         configured = resolve(Platform.LOCAL, chat_id or '')
-    return '\n\n'.join(p for p in (configured, policy.skills_prompt) if p) or None
+    from gateway.session_task_policy import task_policy
+    task = task_policy(policy)
+    overlay = task['system_prompt'] if task else None
+    return '\n\n'.join(p for p in (configured, policy.skills_prompt, overlay) if p) or None
 
 
 def _prefill(authority, policy):

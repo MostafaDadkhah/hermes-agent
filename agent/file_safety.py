@@ -219,8 +219,23 @@ def build_write_denied_prefixes(home: str) -> list[str]:
     return [os.path.realpath(p) + os.sep for p in paths]
 
 
+def _task_roots(kind):
+    from gateway.session_policy import active_policy
+    from gateway.session_task_policy import task_policy
+    task = task_policy(active_policy())
+    return {os.path.realpath(p) for p in task['file_roots'][kind]} if task else None
+
+
+def get_safe_read_roots() -> set[str]:
+    """The current native task's roots; ordinary sessions keep their existing read policy."""
+    return _task_roots('read') or set()
+
+
 def get_safe_write_roots() -> set[str]:
     """Resolved HERMES_WRITE_SAFE_ROOT paths (``os.pathsep``-separated list)."""
+    task_roots = _task_roots("write")
+    if task_roots is not None:
+        return task_roots
     roots: set[str] = set()
     for path in filter(None, os.getenv("HERMES_WRITE_SAFE_ROOT", "").split(os.pathsep)):
         with suppress(OSError, ValueError):
@@ -314,6 +329,8 @@ def get_write_denied_error(path: str, *, verb: str = "Write", entry: bool = Fals
     (``entry``: see :func:`_classify_write_denial`)."""
     denial = _classify_write_denial(path, entry=entry)
     if denial == "safe_root":
+        if _task_roots('write') is not None:
+            return f"{verb} denied: '{path}' is outside this task's write roots."
         roots_display = os.pathsep.join(sorted(get_safe_write_roots()))
         return (
             f"{verb} denied: '{path}' is outside HERMES_WRITE_SAFE_ROOT "
@@ -386,6 +403,9 @@ def get_read_block_error(path: str) -> Optional[str]:
     if nt_error:
         return nt_error
     resolved = Path(path).expanduser().resolve()
+    roots = get_safe_read_roots()
+    if roots and not any(_is_under(resolved, root) for root in roots):
+        return f"Read denied: '{path}' is outside this task's read roots."
     hermes_dirs = _hermes_dirs()
     reason = None
     if any(_is_under(resolved, hd / "skills" / ".hub") for hd in hermes_dirs):

@@ -10,10 +10,12 @@ from dataclasses import asdict, replace
 from hermes_state_runtime import RuntimeStoreError
 
 
-def _rebind(authority, prepared, old, policy, **extra):
+def _rebind(authority, prepared, old, policy, *, drop_terminal_secrets=False, **extra):
     from gateway.session_policy import bind_launch_key, launch_key
     from gateway.session_policy_credentials import recover_config_secrets
     secrets = recover_config_secrets(authority, old) if old.config_secret_ref else {}
+    if drop_terminal_secrets:
+        secrets = {path: value for path, value in secrets.items() if path[0] is not None}
     policy = bind_launch_key(authority, prepared['snapshot']['receipt']['session_id'], policy,
                              launch_key(authority, old), config_secrets=secrets)
     return dict(prepared, policy=asdict(policy), **extra)
@@ -35,6 +37,9 @@ async def prepare_workspace(authority, live, payload, prepared):
     from hermes_constants import translate_cwd_for_wsl_backend
     from tui_gateway import git_probe
     old = restore_policy(prepared['snapshot']['receipt']['policy'])
+    from gateway.session_task_policy import task_policy
+    if task_policy(old) is not None:
+        raise RuntimeStoreError('admission_conflict', detail='Use native task_policy to change a task workspace')
 
     def probe():
         # Off-loop: a stat and up to three `git` spawns.
@@ -49,4 +54,6 @@ async def prepare_workspace(authority, live, payload, prepared):
     return _rebind(authority, prepared, old, policy, git={'branch': branch, 'root': root})
 
 
-PREPARE = {'reasoning': prepare_reasoning, 'workspace': prepare_workspace}
+from gateway.session_task_policy import prepare_task_policy
+
+PREPARE = {'reasoning': prepare_reasoning, 'workspace': prepare_workspace, 'task_policy': prepare_task_policy}
