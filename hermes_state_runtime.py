@@ -498,7 +498,8 @@ def mutate_runtime_session(db, *, epoch: int, principal_id: str, session_id: str
     validate_action(operation, payload)
     if expected_generation is not None and (type(expected_generation) is not int or expected_generation < 0):
         raise RuntimeStoreError('invalid_params')
-    if operation in {'delete', 'rewind', 'reset', 'branch', 'model', 'compress', 'task_policy'} and expected_generation is None:
+    if operation in {'delete', 'rewind', 'reset', 'branch', 'model', 'compress', 'task_policy',
+                     'task_policy_recover'} and expected_generation is None:
         raise RuntimeStoreError('invalid_params')
     # Snapshot caller data before waiting for the writer lock.
     payload = json.loads(_json(payload))
@@ -528,7 +529,7 @@ def mutate_runtime_session(db, *, epoch: int, principal_id: str, session_id: str
         if _prepare_only:
             from hermes_state_mutation_prepared import local_snapshot
             snapshot = local_snapshot(db, conn, session_id)
-            if operation in {'branch', 'task_policy'}:
+            if operation in {'branch', 'task_policy', 'task_policy_recover'}:
                 # The policy/branch commit's own idle rule (queued input too), before the owner starts servers.
                 from hermes_state_mutation_guards import require_idle
                 require_idle(db, conn, list({session_id, snapshot['target']}))

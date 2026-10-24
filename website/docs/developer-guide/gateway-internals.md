@@ -241,6 +241,31 @@ Canonical wire models live in `tui_gateway/contracts/canonical*.py` and generate
 `CanonicalRpcMethods` plus the OpenRPC `x-canonical-methods` catalog, separately
 from the standalone protocol. Both parameters and successful results are checked.
 
+### Frozen task policy refresh and explicit recovery
+
+A native dispatcher-bound task retains its complete launch and terminal policy during
+ordinary and MCP-only profile refresh. Profile defaults cannot replace its Docker,
+network, image, mounts, tools or file roots. Ordinary sessions retain their existing
+refresh behavior, and ordinary policy restoration remains fail-closed.
+
+For a historical receipt whose only inconsistency is its terminal differing from its
+embedded valid task contract, a native owner may explicitly call `session.mutate` with
+`operation: "task_policy_recover"`. The payload is exactly `task_id`,
+`contract_digest`, `receipt_digest` (SHA256 of the canonical complete stored local
+receipt) and `owner_epoch`; `expected_revision`, `expected_generation` and a unique
+`request_id` fence the normal mutation. The same principal, profile, history and
+`session:control` authority are required. Queued, running or unknown admissions,
+active workers, stale fences, another task or contract, arbitrary replacement
+settings and any other invalid policy are refused unchanged.
+
+Recovery takes the terminal only from the embedded validated task, validates the
+complete candidate, then commits and publishes through the ordinary atomic owner
+mutation. It preserves the logical session, compression lineage, history and
+terminal admissions/workers, and admits no prompt or replay. An exact retry returns
+its durable result; a changed retry fails. Successful local qualification is not
+activation: inspect the serving owner's exact code and coordinate application before
+attempting recovery, without restarting an active owner or editing its database.
+
 ACP and finite CLI viewers detach with an explicit recovery notice if an accepted
 input becomes blocked behind an unknown execution. The accepted input remains
 queued: resolve the lost turn before continuing, rather than resending it.

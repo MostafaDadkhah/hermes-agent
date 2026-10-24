@@ -31,6 +31,9 @@ def refreshed_policy(policy, live, terminal, *, picked=(), mcp_only=False):
     flags, the *picked* policy edits) stay. *secrets* are the refreshed sections' private values, *replaced*
     the sections (``None``: terminal) whose stored private values they supersede. *policy* itself when
     nothing moved; a rotated private value alone (its redacted tree unchanged) moves it."""
+    from gateway.session_task_policy import task_policy
+    if task_policy(policy) is not None:
+        return policy, {}, set()
     from gateway.session_policy import _extract_config_secrets, present_sections
     from gateway.session_policy_credentials import secrets_moved
     old, config = json.loads(policy.config_json), json.loads(policy.config_json)
@@ -146,6 +149,11 @@ def _prepare(authority, session_id, mcp_only=False, adopt_only=False):
     generation = authority.db.get_session(session_id)['runtime_generation']
     stored = local_receipt(authority.db, session_id)['policy']
     old = restore_policy(stored)
+    # A native dispatcher owns the complete execution policy, including its terminal.
+    # Profile refresh must not replace those fields and leave the embedded contract stale.
+    from gateway.session_task_policy import task_policy
+    if task_policy(old) is not None:
+        return None
     # A bypass launch never reads the profile; cron, Kanban and room routes are not resumed CLI sessions.
     if old.ignore_user_config or old.source not in SURFACES:
         return None

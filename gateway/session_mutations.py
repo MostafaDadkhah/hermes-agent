@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 _METADATA = frozenset({'rename', 'archive', 'sidebar'})
 # Prepared off the commit like model, then published as a new frozen policy.
-_POLICY = frozenset({'model', 'reasoning', 'workspace', 'editor_mcp', 'edit_policy', 'task_policy'})
+_POLICY = frozenset({'model', 'reasoning', 'workspace', 'editor_mcp', 'edit_policy', 'task_policy',
+                     'task_policy_recover'})
 # Controls that leave the transcript alone authorize on the lineage owner (see ``_owner_ref``).
 _OWNER_AUTHORIZED = _METADATA | {'delete'}
 _FIELDS = frozenset({'session_id', 'request_id', 'expected_revision', 'operation', 'payload'})
@@ -99,8 +100,13 @@ def _owner_ref(authority, ref, params):
 
 
 async def mutate_session(authority, actor, ref, params, *, native_owner=False):
-    if params.get('operation') == 'task_policy' and not native_owner:
+    if params.get('operation') in {'task_policy', 'task_policy_recover'} and not native_owner:
         raise RuntimeStoreError('permission_denied')
+    if params.get('operation') == 'task_policy_recover':
+        from gateway.session_task_policy_recovery import validate_recovery_payload
+        validate_recovery_payload(params.get('payload'))
+        if params['payload']['owner_epoch'] != authority.epoch:
+            raise RuntimeStoreError('stale_epoch')
     from gateway.session_runtime_workers import track_mutation
     authority._require_admission_open()
     # A request socket can disappear while its writer is inside to_thread. The owner task keeps
@@ -110,7 +116,7 @@ async def mutate_session(authority, actor, ref, params, *, native_owner=False):
 
 
 async def _owned_mutation(authority, actor, ref, params):
-    if (params.get('operation') in {*_POLICY, 'compress', 'reset', 'rewind'}
+    if (params.get('operation') in ({*_POLICY, 'compress', 'reset', 'rewind'} - {'task_policy_recover'})
             and ref.session_id not in authority.sessions and 'request_id' in params):
         _authorize_control(authority, actor, ref, params)
     owner = _owner_ref(authority, ref, params)
@@ -157,7 +163,11 @@ async def _mutate_session(authority, actor, ref, params, *, commit_lock=None, ow
     if operation == 'import':
         imported_ids = _authorize_import(authority, actor, ref, params)
     else:
-        cold_history = _authorize_control(authority, actor, ref, params, owner)
+        if operation == 'task_policy_recover':
+            from gateway.session_task_policy_recovery import authorize_recovery
+            cold_history = authorize_recovery(authority, actor, ref)
+        else:
+            cold_history = _authorize_control(authority, actor, ref, params, owner)
     if operation == 'branch' and 'session:create' not in actor.capabilities:
         raise RuntimeStoreError('permission_denied')
     authority._require_admission_open()
@@ -329,7 +339,11 @@ def _project_committed(authority, ref, operation, result):
     if operation in _POLICY:
         from gateway.session_local import publish_local_policy
         # The edit policy is read per edit, never by the built agent: it keeps its agent (and prompt cache).
-        publish_local_policy(authority, ref.session_id, evict=operation != 'edit_policy')
+        if operation == 'task_policy_recover' and ref.session_id not in authority.sessions:
+            from gateway.session_local_recovery import restore_local_session
+            restore_local_session(authority, ref.session_id)
+        else:
+            publish_local_policy(authority, ref.session_id, evict=operation != 'edit_policy')
         # A drain that ran while the receipt committed off-loop saw the new stored policy beside
         # the old live one and paused; with both now equal, queued input must run, not wait for
         # the next submit or restart.

@@ -125,3 +125,33 @@ def test_invalid_task_policy_is_rejected(tmp_path, field, bad):
     value[field] = bad
     with pytest.raises(RuntimeStoreError):
         validate_task_policy(value)
+
+
+@pytest.mark.asyncio
+async def test_native_task_resume_keeps_frozen_execution_policy(tmp_path, monkeypatch):
+    """An ordinary resume must not replace a dispatcher's sandbox with profile defaults."""
+    from gateway.session_policy import policy_for_source, restore_policy
+    from hermes_state_local import local_receipt
+
+    store, db, authority, owner, ref = _owner(tmp_path, monkeypatch, None)
+    owner.native_owner = True
+    try:
+        value = policy_value(tmp_path / 'project-a')
+        accepted = await owner.dispatch(_mutation(db, ref, 'bind-for-resume', 'task_policy', value))
+        assert 'result' in accepted, accepted
+        live = authority.sessions[ref.session_id]
+        bound = policy_for_source(authority.runner, live.source)
+        before = db.get_session(ref.session_id)
+        history = db.get_messages(ref.session_id)
+        for attempt in range(2):
+            resumed = await owner.dispatch({'id': f'resume-{attempt}', 'method': 'session.resume',
+                                           'params': {'session_id': ref.session_id}})
+            assert 'result' in resumed, resumed
+            assert resumed['result']['info']['launch_request']['task_policy'] == value
+            assert policy_for_source(authority.runner, live.source) == bound
+            assert restore_policy(local_receipt(db, ref.session_id)['policy']) == bound
+            assert db.get_session(ref.session_id)['runtime_generation'] == before['runtime_generation']
+            assert db.get_messages(ref.session_id) == history
+    finally:
+        await owner.close()
+        store.close_all_db_handles()

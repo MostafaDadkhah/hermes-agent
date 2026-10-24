@@ -74,6 +74,8 @@ async def prepare_edit_policy(authority, live, payload, prepared):
 
 
 from gateway.session_task_policy import prepare_task_policy
+from gateway.session_task_policy_recovery import prepare_recovery
 
 PREPARE = {'reasoning': prepare_reasoning, 'workspace': prepare_workspace,
-           'edit_policy': prepare_edit_policy, 'task_policy': prepare_task_policy}
+           'edit_policy': prepare_edit_policy, 'task_policy': prepare_task_policy,
+           'task_policy_recover': prepare_recovery}

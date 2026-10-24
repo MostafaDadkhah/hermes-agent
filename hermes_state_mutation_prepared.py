@@ -99,10 +99,23 @@ def task_policy_in_transaction(db, conn, session_id, payload, prepared):
     return affected, {**projection, 'task_id': payload['task_id'], 'contract_digest': payload['contract_digest']}
 
 
+def task_policy_recover_in_transaction(db, conn, session_id, payload, prepared):
+    from hermes_state_mutation_guards import require_idle
+    from gateway.session_task_policy_recovery import recovery_candidate
+    snapshot = validate_prepared(db, conn, session_id, prepared)
+    require_idle(db, conn, list({session_id, snapshot['target']}))
+    if prepared['policy'] != recovery_candidate(snapshot['receipt'], payload):
+        raise RuntimeStoreError('admission_conflict')
+    snapshot, generation = _commit_policy(db, conn, session_id, prepared)
+    return {session_id, snapshot['target']}, {'task_id': payload['task_id'],
+        'contract_digest': payload['contract_digest'], 'execution_generation': generation}
+
+
 POLICY_HANDLERS = {'model': model_in_transaction, 'reasoning': reasoning_in_transaction,
                    'workspace': workspace_in_transaction, 'editor_mcp': editor_mcp_in_transaction,
                    'edit_policy': edit_policy_in_transaction,
-                   'task_policy': task_policy_in_transaction}
+                   'task_policy': task_policy_in_transaction,
+                   'task_policy_recover': task_policy_recover_in_transaction}
 
 
 _RECEIPTS = "FROM state_meta WHERE key GLOB 'gateway.mutation.v1.*' AND json_valid(value) "
