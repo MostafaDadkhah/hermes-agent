@@ -553,7 +553,7 @@ def _stopped_before_spawn(authority, ref, row):
     return True
 
 
-async def _spawn_registered_worker(authority, ref, row):
+async def _spawn_registered_worker(authority, ref, row, policy):
     """Spawn the turn's child and register it for Stops: ``(worker, process)``, or None when the spawn was cancelled (the
     interrupted result is already recorded). The generation stays marked spawning until registration."""
     spawning = _mark_spawning(authority, ref, row)
@@ -615,7 +615,7 @@ async def execute_managed(authority, ref, row, policy):
         return refusal
     if _stopped_before_spawn(authority, ref, row):
         return ''
-    spawned = await _spawn_registered_worker(authority, ref, row)
+    spawned = await _spawn_registered_worker(authority, ref, row, policy)
     if spawned is None:
         return ''
     worker, process = spawned
