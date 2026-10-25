@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar
 from hermes_state_common import (
     TITLE_SOURCE_DERIVED as _TITLE_SOURCE_DERIVED, TITLE_SOURCE_LLM as _TITLE_SOURCE_LLM,
     TITLE_SOURCE_USER as _TITLE_SOURCE_USER,
-    escape_like as _escape_like, _placeholders,
+    escape_like as _escape_like, _placeholders, acquire_writer_mutex,
     stat_db_file_identity as _stat_db_file_identity,
 )
 from hermes_state_holders import read_only_db_uri
@@ -1017,12 +1017,8 @@ class SessionDB(
             patience_s = self._WRITE_PATIENCE_S
         deadline = time.monotonic() + patience_s
         compression_deadline: Optional[float] = None  # set on the first compression-busy collision
-        # One retry for SQLITE_IOERR raised by BEGIN IMMEDIATE itself (callback not run: nothing
-        # replayed). Once fn has started, an IOERR leaves settlement unknown and must propagate.
-        # The callback has not run at that point, so there is no durable effect to replay and the retry is
-        # exactly-once safe (#99502's contract). Once the callback starts, an IOERR leaves the write's
-        # settlement unknown and must propagate — this helper owns non-idempotent transcript/counter
-        # mutations, not just idempotent UPSERTs.
+        # Retry BEGIN IMMEDIATE IOERR once, before the callback can have any effect (#99502).
+        # After fn starts, settlement is unknown: transcript/counter writes must never replay.
         ioerr_begin_retried = False
         while True:
             self._raise_if_db_corrupt(storage=True)
@@ -1037,8 +1033,9 @@ class SessionDB(
             # later writes (#105567). Inside the lock the probe only ever sees the
             # stable post-close state (identity cleared → adopt / reopen path).
             fn_started = False
+            acquire_writer_mutex(self._lock, deadline)
             try:
-                with self._lock:
+                try:
                     self._raise_if_db_replaced()
                     if self._conn is None:  # close() raced this writer
                         self._reopen_after_close_locked(context="write")
@@ -1053,6 +1050,8 @@ class SessionDB(
                         except Exception:
                             pass
                         raise
+                finally:
+                    self._lock.release()
                 # Success — periodic best-effort checkpoint + FTS merge.
                 self._write_count += 1
                 if self._write_count % self._CHECKPOINT_EVERY_N_WRITES == 0:

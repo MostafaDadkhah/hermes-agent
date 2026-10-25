@@ -6,6 +6,7 @@ import errno
 import json
 import logging
 import os
+import sqlite3
 import sys
 import time
 from typing import Any
@@ -22,6 +23,12 @@ from agent.context_compressor import (LEGACY_SUMMARY_PREFIX, SUMMARY_PREFIX, _ME
 TITLE_SOURCE_DERIVED = "derived"
 TITLE_SOURCE_LLM = "llm"
 TITLE_SOURCE_USER = "user"
+
+
+def acquire_writer_mutex(lock, deadline: float) -> None:
+    """Keep a lease refresh's mutex wait inside the same budget as its SQLite retries."""
+    if not lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        raise sqlite3.OperationalError("database is locked (Hermes writer mutex patience exhausted)")
 
 
 # Session preview = head of the first user message (shown when a session has no title).  A /skill invocation

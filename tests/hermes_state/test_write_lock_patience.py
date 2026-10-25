@@ -47,6 +47,36 @@ def db(tmp_path):
 
 
 class TestTranscriptWritePatience:
+    def test_same_instance_mutex_wait_is_bounded(self, db):
+        """A stuck sibling thread must not let a lease refresher wait past write patience."""
+        db.create_session("lease", "cli")
+        assert db.try_acquire_session_turn_lease("lease", "holder")
+        original_expiry = db.session_turn_lease_expires_at("lease", "holder")
+        finished = threading.Event()
+        errors = []
+
+        def refresh():
+            try:
+                db.refresh_session_turn_lease("lease", "holder", ttl_seconds=600, patience_s=0.2)
+            except sqlite3.OperationalError as exc:
+                errors.append(exc)
+            finally:
+                finished.set()
+
+        assert db._lock.acquire(timeout=1.0)
+        worker = threading.Thread(target=refresh)
+        worker.start()
+        try:
+            assert finished.wait(2.0), "lease refresh ignored write patience behind the instance mutex"
+        finally:
+            db._lock.release()
+            worker.join(timeout=5.0)
+        assert not worker.is_alive()
+        assert len(errors) == 1 and "writer mutex patience" in str(errors[0])
+        assert db.session_turn_lease_expires_at("lease", "holder") == original_expiry
+        assert db.refresh_session_turn_lease("lease", "holder", ttl_seconds=600, patience_s=2.0)
+        assert db.session_turn_lease_expires_at("lease", "holder") > original_expiry
+
     def test_append_message_survives_multi_second_lock_hold(self, db, tmp_path):
         """A transcript append must ride out a lock held well past the old
         ~1-2s attempt-counted budget instead of aborting the turn."""
